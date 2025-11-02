@@ -49,12 +49,14 @@ async function runQuery(client: PoolClient, limit: number, context: QueryContext
   const sql = hasCursor
     ? `SELECT id, cod_imovel, geojson
          FROM dw.dm_sicar
-         WHERE id > $1 AND id <= ${MAX_RECORD_ID}
+         WHERE id > $1 
+         AND id <= ${MAX_RECORD_ID}
          ORDER BY id
          LIMIT $2`
     : `SELECT id, cod_imovel, geojson
          FROM dw.dm_sicar
-         WHERE id <= ${MAX_RECORD_ID}
+         WHERE 1=1
+         AND id <= ${MAX_RECORD_ID}
          ORDER BY id
          LIMIT $1`;
 
