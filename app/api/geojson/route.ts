@@ -17,7 +17,7 @@ type GeoJsonResponse = {
 
 const DEFAULT_LIMIT = 5000;
 const MAX_LIMIT = 20000;
-const MAX_RECORD_ID = 2_000_000;
+const MAX_RECORD_ID = 2000000;
 
 type QueryContext = {
   cursorValue?: number;
@@ -50,15 +50,13 @@ async function runQuery(client: PoolClient, limit: number, context: QueryContext
     ? `SELECT id, cod_imovel, geojson
          FROM dw.dm_sicar
          WHERE id > $1 
-         AND id <= ${MAX_RECORD_ID}
          ORDER BY id
          LIMIT $2`
     : `SELECT id, cod_imovel, geojson
          FROM dw.dm_sicar
-         WHERE 1=1
-         AND id <= ${MAX_RECORD_ID}
          ORDER BY id
          LIMIT $1`;
+         
 
   const params = hasCursor ? [context.cursorValue, limit] : [limit];
 
