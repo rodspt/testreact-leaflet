@@ -5,6 +5,7 @@ import type { ReactElement } from "react";
 import { MapContainer, TileLayer } from "react-leaflet";
 import type { Feature, FeatureCollection, Geometry, Point } from "geojson";
 import Supercluster from "supercluster";
+import type { ClusterFeature, PointFeature } from "supercluster";
 import L from "leaflet";
 import { Toast } from "primereact/toast";
 import { ProgressBar } from "primereact/progressbar";
@@ -30,7 +31,8 @@ type ClusterProperties = {
   point_count_abbreviated?: number;
 };
 
-type ClusterPointFeature = Feature<Point, ClusterProperties>;
+type ClusterPointFeature = PointFeature<ClusterProperties>;
+type ClusterOrPointFeature = ClusterFeature<ClusterProperties> | ClusterPointFeature;
 
 type ApiResponse = {
   features: FeatureCollection<Geometry>;
@@ -122,12 +124,12 @@ export default function MapView(): ReactElement {
 
     const zoom = Math.round(map.getZoom());
     const bounds = map.getBounds();
-    const clusters = superclusterInstance.getClusters(
+    const clusters: ClusterOrPointFeature[] = superclusterInstance.getClusters(
       [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()],
       zoom
-    );
+    ) as ClusterOrPointFeature[];
 
-    clusters.forEach((cluster) => {
+    clusters.forEach((cluster: ClusterOrPointFeature) => {
       const [lng, lat] = cluster.geometry.coordinates as [number, number];
       if (cluster.properties?.cluster) {
         const marker = L.marker([lat, lng], {
@@ -136,10 +138,21 @@ export default function MapView(): ReactElement {
         const clusterId = cluster.properties.cluster_id;
         if (typeof clusterId === "number") {
           marker.on("click", () => {
-            const nextZoom = Math.min(
-              superclusterInstance.getClusterExpansionZoom(clusterId),
-              CLUSTER_MAX_ZOOM
-            );
+            if (!pointsRef.current.length) {
+              return;
+            }
+
+            let nextZoom = map.getZoom();
+            try {
+              nextZoom = Math.min(
+                superclusterInstance.getClusterExpansionZoom(clusterId),
+                CLUSTER_MAX_ZOOM
+              );
+            } catch (error) {
+              console.warn("Failed to expand cluster", error);
+              return;
+            }
+
             map.flyTo([lat, lng], nextZoom);
           });
         }
@@ -164,8 +177,13 @@ export default function MapView(): ReactElement {
     }
   }, [ensureClusterLayer, getSupercluster]);
 
+
   const addCollection = useCallback(
     (collection: FeatureCollection<Geometry>) => {
+      if (!collection.features.length) {
+        return;
+      }
+
       const superclusterInstance = getSupercluster();
       if (!superclusterInstance) {
         return;
@@ -173,7 +191,6 @@ export default function MapView(): ReactElement {
 
       const newPoints: ClusterPointFeature[] = [];
       const nextBounds = L.latLngBounds([]);
-
       if (boundsRef.current && boundsRef.current.isValid()) {
         nextBounds.extend(boundsRef.current.getSouthWest());
         nextBounds.extend(boundsRef.current.getNorthEast());
@@ -199,7 +216,7 @@ export default function MapView(): ReactElement {
         nextBounds.extend(center);
       });
 
-      if (newPoints.length === 0) {
+      if (!newPoints.length) {
         return;
       }
 
@@ -211,7 +228,7 @@ export default function MapView(): ReactElement {
         renderClusters();
       }
     },
-    [mapReady, renderClusters, getSupercluster]
+    [getSupercluster, mapReady, renderClusters]
   );
 
   useEffect(() => {
@@ -220,7 +237,9 @@ export default function MapView(): ReactElement {
     boundsRef.current = null;
     featureMapRef.current.clear();
     pointsRef.current = [];
-    getSupercluster();
+    // Reset the shared Supercluster instance so a fresh one will be
+    // created when needed (avoids keeping stale index/config).
+    superclusterRef.current = null;
     nextFeatureIdRef.current = 1;
     setTotalFetched(0);
     setHasMore(true);
@@ -275,73 +294,8 @@ export default function MapView(): ReactElement {
     return () => {
       cancelledRef.current = true;
     };
-  }, [addCollection, getSupercluster]);
+  }, [addCollection]);
 
-  useEffect(() => {
-    cancelledRef.current = false;
-    shouldFitBoundsRef.current = true;
-    boundsRef.current = null;
-    featureMapRef.current.clear();
-    pointsRef.current = [];
-    // Ensure we initialize (or retrieve) the shared Supercluster instance
-    // via the getSupercluster helper so the instance lives in the ref and
-    // any configuration remains consistent across the component.
-    getSupercluster();
-    nextFeatureIdRef.current = 1;
-    setTotalFetched(0);
-    setHasMore(true);
-
-    let cursor: string | undefined;
-
-    const load = async () => {
-      setIsLoading(true);
-      try {
-        while (!cancelledRef.current) {
-          const params = new URLSearchParams({ limit: String(FETCH_LIMIT) });
-          if (cursor) {
-            params.set("cursor", cursor);
-          }
-
-          const response = await fetch(`/api/geojson?${params.toString()}`, {
-            cache: "no-store"
-          });
-
-          if (!response.ok) {
-            throw new Error(`Falha ao buscar dados (${response.status})`);
-          }
-
-          const payload: ApiResponse = await response.json();
-          addCollection(payload.features);
-          setTotalFetched((prev) => prev + payload.features.features.length);
-
-          if (!payload.nextCursor) {
-            setHasMore(false);
-            break;
-          }
-
-          cursor = payload.nextCursor;
-          await new Promise((resolve) => setTimeout(resolve, YIELD_DELAY_MS));
-        }
-      } catch (error) {
-        console.error(error);
-        toastRef.current?.show({
-          severity: "error",
-          summary: "Erro",
-          detail: "Falha ao carregar os dados do mapa"
-        });
-      } finally {
-        if (!cancelledRef.current) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    void load();
-
-    return () => {
-      cancelledRef.current = true;
-    };
-  }, [addCollection, getSupercluster]);
 
   useEffect(() => {
     if (!mapReady) {
