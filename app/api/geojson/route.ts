@@ -17,7 +17,7 @@ type GeoJsonResponse = {
 
 const DEFAULT_LIMIT = 5000;
 const MAX_LIMIT = 20000;
-const MAX_RECORD_ID = 2000000;
+const MAX_RECORD_ID = 200000;
 
 type QueryContext = {
   cursorValue?: number;
@@ -44,6 +44,7 @@ function buildFeature(row: SicarRow): Feature {
 }
 
 async function runQuery(client: PoolClient, limit: number, context: QueryContext) {
+  
   const hasCursor = typeof context.cursorValue === "number";
 
   const sql = hasCursor
@@ -63,6 +64,7 @@ async function runQuery(client: PoolClient, limit: number, context: QueryContext
   const cursorQuery = client.query(new Cursor(sql, params));
 
   return new Promise<SicarRow[]>((resolve, reject) => {
+   
     cursorQuery.read(limit, (err, rows) => {
       if (err) {
         cursorQuery.close(() => reject(err));
